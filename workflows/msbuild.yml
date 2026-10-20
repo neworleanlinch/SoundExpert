@@ -1,0 +1,78 @@
+name: Build
+
+on:
+  push:
+    branches: [ main ]
+    paths-ignore:
+      - README.md
+      - LICENSE
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: windows-2025-vs2026
+
+    defaults:
+      run:
+        shell: cmd
+        working-directory: ${{ github.workspace }}
+
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
+      - name: Set up MSVC (x86)
+        uses: ilammy/msvc-dev-cmd@v1
+        with:
+          arch: x86
+
+      - name: Setup msbuild
+        uses: microsoft/setup-msbuild@v3
+
+      - name: Install premake5
+        uses: Jarod42/install-premake5@v7
+
+      - name: Clone plugin-sdk
+        run: git clone --depth 1 https://github.com/DK22Pac/plugin-sdk.git "%GITHUB_WORKSPACE%\plugin-sdk"
+
+      - name: Set PLUGIN_SDK_DIR
+        run: echo PLUGIN_SDK_DIR=%GITHUB_WORKSPACE%\plugin-sdk>>%GITHUB_ENV%
+
+      - name: Generate plugin-sdk project files
+        working-directory: ${{ github.workspace }}\plugin-sdk
+        run: |
+          call "tools\generate\Visual Studio.bat"
+
+      - name: Build plugin-sdk
+        working-directory: ${{ github.workspace }}\plugin-sdk
+        run: |
+          msbuild plugin.sln ^
+            /p:Configuration=Release ^
+            /p:Platform="Mixed Platforms" ^
+            /target:plugin_sa ^
+            /m ^
+            /verbosity:minimal
+
+      - name: Generate project files
+        run: premake5 vs2026
+
+      - name: Build EarShot (ReleaseSA)
+        run: |
+          msbuild project_files\EarShotOpenAL.slnx ^
+            /p:Configuration=ReleaseSA ^
+            /p:Platform=Win32 ^
+            /m ^
+            /verbosity:minimal
+
+      - name: Find EarShot.asi
+        run: |
+            set "ASI_PATH=%GITHUB_WORKSPACE%\output\asi\EarShot.asi"
+            if not exist "%ASI_PATH%" exit /b 1
+            echo ASI_PATH=%ASI_PATH%>>%GITHUB_ENV%
+
+      - name: Upload EarShot.asi
+        uses: actions/upload-artifact@v4
+        with:
+          name: EarShot-${{ github.sha }}
+          path: ${{ env.ASI_PATH }}
+          if-no-files-found: error
